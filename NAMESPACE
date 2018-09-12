@@ -1,3 +1,4 @@
 exportPattern("^[[:alpha:]]+")
-importFrom("stats","D", "model.matrix", "rbinom")
+importFrom("stats","D", "model.matrix", "rbinom","residuals")
+importFrom("methods","is")
 

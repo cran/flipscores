@@ -83,13 +83,12 @@ flipscores <- function(model0, model1, X1, alternative = "two.sided",  w=1E5, sc
 
   #BASIC SCORE
   if(scoretype=="basic"){
-    scores <- .X1*(model0$residuals)/a
+    scores <- .X1*(residuals(model0,"response"))/a
     flips <- matrix( (rbinom(n*w, 1, 0.5))*2-1, nrow=w,ncol=n )
     flips[1,] <- numeric(n)+1
     flipScores <-  flips %*% scores
-    pv <- sum(flipScores >= flipScores[1]) /w
 
-
+    
     if(alternative=="greater" | alternative== "larger"){
       pv <- sum(flipScores >= flipScores[1]) /w
     }
@@ -100,7 +99,6 @@ flipscores <- function(model0, model1, X1, alternative = "two.sided",  w=1E5, sc
       pv <- 2 * min(  sum(flipScores >= flipScores[1]),
                       sum(flipScores <= flipScores[1])) / w
     }
-
   }
 
 
@@ -114,18 +112,16 @@ flipscores <- function(model0, model1, X1, alternative = "two.sided",  w=1E5, sc
     }
     invInfMat=solve(t(X*wei)%*%X,silent=TRUE)
 
-    scores <- X*(model0$residuals)/a
+    scores <- X*(residuals(model0,"response"))/a
 
 
-    effScores=invInfMat%*% t(scores)
+    effScores=invInfMat%*%t(scores)
     effScores=as.vector(effScores[1,]) # see Marohn 2002
 
 
     flips <- matrix( (rbinom(n*w, 1, 0.5))*2-1, nrow=w,ncol=n )
     flips[1,] <- numeric(n)+1
     flipEffScores <-  flips %*% effScores
-
-
 
 
     if(alternative=="greater" | alternative== "larger"){
@@ -138,7 +134,6 @@ flipscores <- function(model0, model1, X1, alternative = "two.sided",  w=1E5, sc
       pv <- 2 * min(  sum(flipEffScores >= flipEffScores[1]),
                      sum(flipEffScores <= flipEffScores[1])) / w
     }
-
   }
 
   pv
