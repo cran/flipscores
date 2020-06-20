@@ -1,145 +1,129 @@
-
-flipscores <- function(model0, model1, X1, alternative = "two.sided",  w=1E5, scoretype="basic"){
-
-  if(!missing(X1)){.X1 <- X1}
-
-
-  if(missing(X1) & missing(model1)){
-    stop('specify either X1 or model1')
-  }
-
-
-  if(!missing(model1)){
-    if ( length(model1$coefficients) != 1+length(model0$coefficients)  ){
-      stop('model1 should contain exactly one variable more than model0')
-    }
-  }
-
-
-  #Get covariate of interest X1:
-  if(missing(X1)){
-    nvars <- dim(model.matrix(model1))[2]
-
-    vecs0 <- vector("list", nvars-1)
-    vecs1 <- vector("list", nvars)
-
-    for(i in 1:(nvars-1) ){
-      vecs0[[i]]<- model.matrix(model0)[,i]
-      vecs1[[i]]<- model.matrix(model1)[,i]
-    }
-
-    vecs1[[nvars]]<- model.matrix(model1)[,nvars]
-
-
-    .X1 = setdiff(vecs1,vecs0)[[1]]
-  }
-
-
-  if( length(levels(.X1))>2 ){
-    stop('The covariate of interest has more than 2 levels, so the score is not defined.')
-  }
-
-
-  if(is.factor(.X1)){
-    .X1 <- 2*(as.numeric(.X1)-1.5)
-  }
-
-
-  n <- length(.X1)
-
-
-  if(class(model0)[1]=="lm"){
-    a <- 1
-  } else{
-
-    #The following lines for obtaining 'a' are taken from the mdscore package on CRAN
-    #by Antonio Hermes M. da Silva-Junior, Damiao N. da Silva and Silvia L. P. Ferrari
-
-
-    mu.est <- model0$fitted.values
-    eta.est <- model0$family$linkfun(mu.est)
+#' @title Robust testing in GLMs, by sign-flipping score contributions
+#'
+#' @description Provides robust tests for testing in GLMs, by sign-flipping score contributions. The tests are often robust against overdispersion, heteroscedasticity and, in some cases, ignored nuisance variables.
+#' @param score_type The type of score that is computed. It can be "orthogonalized", "effective" or "basic". 
+#' Both "orthogonalized" and "effective" take into account the nuisance estimation and they provide the same
+#' test statistic. In case of small samples "effective score" might have a slight anti-conservative behaviour. 
+#' "orthogonalized effective score" gives a solution for this issue.
+#' Note that in case of a big model matrix, the "orthogonalized" may take a long time.
+#'
+#' @param n_flips The number of random flips of the score contributions.
+#' When \code{n_flips} is equal or larger than the maximum number of possible flips (i.e. n^2), all possible flips are performed.
+#'
+#' @param id a \code{vector} identifying the clustered observations. If \code{NULL} (default) observations are assumed to be independent. 
+#' @param alternative It can be "greater", "less" or "two.sided" (default)
+#' @param formula see \code{glm} function.
+#' @param family see \code{glm} function.
+#' @param data see \code{glm} function.
+#' @param ... see \code{glm} function.
+#' 
+#'
+#' @usage flipscores(formula, family, data, score_type, 
+#' n_flips=5000, alternative ="two.sided", id = NULL, ...)
+#'
+#' @return glm class object with sign-flip score test.
+#' See also the related functions (\code{summary.flipscores}, \code{anova.flipscores}, \code{print.flipscores}). 
+#'
+#' @details \code{flipscores} borrow the same parameters from function \code{glm} (and \code{glm.nb}). See these helps for more details about parameters such as \code{formula},
+#' \code{data}, \code{family}. Note: in order to use Negative Binomial family, \code{family} reference must have quotes (i.e. \code{family="negbinom"}). 
+#'
+#' @author Livio Finos, Vittorio Giatti, Jesse Hemerik and Jelle Goeman
+#'
+#' @seealso \code{\link{anova.flipscores}}, \code{\link{summary.flipscores}}, \code{\link[flip]{flip}}
+#'
+#' @name flipscores
+#' 
+#' @references "Robust testing in generalized linear models by sign-flipping score contributions" by J.Hemerik, J.Goeman and L.Finos.
+#' 
+#' @examples
+#' set.seed(1)
+#' dt=data.frame(X=rnorm(20),
+#'    Z=factor(rep(LETTERS[1:3],length.out=20)))
+#' dt$Y=rpois(n=20,lambda=exp(dt$Z=="C"))
+#' mod=flipscores(Y~Z+X,data=dt,family="poisson",score_type = "effective")
+#' summary(mod)
+#' @export
 
 
 
+flipscores<-function(formula, family, data,
+                         score_type,
+                         n_flips=5000, 
+                         alternative ="two.sided", 
+                         id = NULL, 
+                         ...){
+  # if(FALSE) flip() #just a trick to avoid warnings in package building
+  # temp=is(formula) #just a trick to avoid warnings in package building
+  # catturo la call,
+  fs_call <- mf <- match.call()
 
-    V <- if(model0$family[[1]] == "gaussian") quote(1) else
-      as.list(model0$family$variance)[[2]]
+  if(match(c("alternative"), names(call), 0L)){
+    if (alternative == "less" | alternative == "smaller") {alternative = -1}
+    if (alternative == "two.sided") {alternative = 0}
+    if (alternative == "greater" | alternative == "larger") {alternative = 1}}
+  else alternative=0
 
+  score_type=match.arg(score_type,c("orthogonalized","effective","basic"))
+  if(missing(score_type))
+    stop("test type is not specified or recognized")
 
-    if(model0$family[[2]] %in% c("log", "cloglog", "logit")){
-      mu <- switch(model0$family[[2]],
-                   log     = quote(exp(eta)),
-                   cloglog = quote(1 - exp(-exp(eta))),
-                   logit   = quote(exp(eta)/(1 + exp(eta))))
-    }else mu <- as.list(model0$family$linkinv)[[2]]
-
-    Dmu <- D(mu,"eta")
-
-    a <- eval(V, list(mu= mu.est)) / eval(Dmu, list(eta= eta.est))
-  }
-
-
-
-
-  #BASIC SCORE
-  if(scoretype=="basic"){
-    scores <- .X1*(residuals(model0,"response"))/a
-    flips <- matrix( (rbinom(n*w, 1, 0.5))*2-1, nrow=w,ncol=n )
-    flips[1,] <- numeric(n)+1
-    flipScores <-  flips %*% scores
-
-    
-    if(alternative=="greater" | alternative== "larger"){
-      pv <- sum(flipScores >= flipScores[1]) /w
-    }
-    if(alternative=="less" | alternative== "smaller"){
-      pv <- sum(flipScores <= flipScores[1]) /w
-    }
-    if(alternative=="two.sided"){
-      pv <- 2 * min(  sum(flipScores >= flipScores[1]),
-                      sum(flipScores <= flipScores[1])) / w
-    }
-  }
-
-
-  #EFFECTIVE SCORE
-  if(scoretype=="eff" | scoretype=="effective"){
-    X <- cbind(.X1,model.matrix(model0))
-    if(class(model0)[1]=="lm"){
-      wei <- numeric(n)+1
+  # individuo i parametri specifici di flip score
+  m <- match(c("score_type","n_flips","alternative","id"), names(mf), 0L)
+  m <- m[m>0]
+  flip_param_call= mf[c(1L,m)]
+  #rinomino la funzione da chiamare:
+  flip_param_call[[1L]]=quote(flip::flip)
+  names(flip_param_call)[names(flip_param_call)=="alternative"]="tail"
+  names(flip_param_call)[names(flip_param_call)=="n_flips"]="perms"
+  
+  # mi tengo solo quelli buoni per glm
+  if(length(m)>0) mf <- mf[-m]
+  
+  param_x_ORIGINAL=mf$x
+  #set the model to fit
+  if(!is.null(mf$family)&&(mf$family=="negbinom")){
+    mf[[1L]]=quote(glm.nb)
+    mf$family=NULL
     } else{
-    wei <- as.numeric(model0$weights)
+      mf[[1L]]=quote(glm)
     }
-    invInfMat=solve(t(X*wei)%*%X,silent=TRUE)
+  
+  #compute H1 model
+  mf$x=TRUE
+  model <- eval(mf, parent.frame())
+  
+  
+  #compute H0s models
+  model$scores=sapply(1:ncol(model$x),socket_compute_scores,model,score_type=score_type)
+  colnames(model$scores)=colnames(model$x)
+  
+  ############### fit the H1 model and append the scores (refitted under H0s)
+  
+  ###############################
+  ## compute flips
+  
+  ### TODO RENDERE PIù AGILE INPUT DI id (es formula se possibile?) 
+  # + quality check
+  if(!is.null(flip_param_call$id))
+    model$scores=rowsum(model$scores,eval(flip_param_call$id))
+  
+  #  call to flip::flip()
+  flip_param_call$Y=model$scores
+  flip_param_call$statTest = "sum"
+  # require(flip)
+  results=eval(flip_param_call, parent.frame())
+  
+  ### output
+  model$call=fs_call
+  model$id=flip_param_call$id
+  model$Tspace=results@permT
+  model$p.values=results@res$`p-value`
+  model$score_type=score_type
+  model$n_flips=n_flips
 
-    scores <- X*(residuals(model0,"response"))/a
-
-
-    effScores=invInfMat%*%t(scores)
-    effScores=as.vector(effScores[1,]) # see Marohn 2002
-
-
-    flips <- matrix( (rbinom(n*w, 1, 0.5))*2-1, nrow=w,ncol=n )
-    flips[1,] <- numeric(n)+1
-    flipEffScores <-  flips %*% effScores
-
-
-    if(alternative=="greater" | alternative== "larger"){
-      pv <- sum(flipEffScores >= flipEffScores[1]) /w
-    }
-    if(alternative=="less" | alternative== "smaller"){
-      pv <- sum(flipEffScores <= flipEffScores[1]) /w
-    }
-    if(alternative=="two.sided"){
-      pv <- 2 * min(  sum(flipEffScores >= flipEffScores[1]),
-                     sum(flipEffScores <= flipEffScores[1])) / w
-    }
-  }
-
-  pv
+  
+  if(is.null(param_x_ORIGINAL)||(!param_x_ORIGINAL)) model$x=NULL
+  # class(model) <- 
+  class(model) <- c("flipscores", class(model))
+  return(model)
 }
-
-
-
-
-
