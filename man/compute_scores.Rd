@@ -4,7 +4,7 @@
 \alias{compute_scores}
 \title{compute_scores}
 \usage{
-compute_scores(model0, model1, score_type = "orthogonalized")
+compute_scores(model0, model1, score_type = "standardized")
 }
 \arguments{
 \item{model0}{a \code{glm} object with the model under the null hypothesis (i.e. the covariates, the nuisance parameters).}
@@ -13,7 +13,7 @@ compute_scores(model0, model1, score_type = "orthogonalized")
 \code{model1} is a \code{matrix}, it contains the tested variables column-wise.}
 
 \item{score_type}{The type of score that is computed. It is "orthogonalized", "effective" or "basic".
-Default is "orthogonalized". "effective" and "orthogonalized" take into account the nuisance estimation.}
+"effective" and "orthogonalized" take into account the nuisance estimation.}
 }
 \description{
 Same usage as \code{anova.glm}. 
@@ -21,12 +21,15 @@ The parameter \code{id}  is used too,
 if present in \code{model0} (with priority) or in \code{model1}.
 }
 \examples{
+set.seed(1)
 Z=rnorm(20)
 X=Z+rnorm(20)
 Y=rpois(n=20,lambda=exp(Z+X))
 mod0=glm(Y~Z,family="poisson")
-(scr0=compute_scores(model0 = mod0, model1 = X, score_type = "effective"))
+X=data.frame(X=X)
+scr0=compute_scores(model0 = mod0, model1 = X)
+head(scr0)
 }
 \author{
-Jesse Hemerik, Vittorio Giatti, Jelle Goeman and Livio Finos
+Jesse Hemerik, Riccardo De Santis, Vittorio Giatti, Jelle Goeman and Livio Finos
 }
