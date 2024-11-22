@@ -1,5 +1,5 @@
 # for standardized:
-.score_std=function(scr_eff,flp) {
+.score_std=function(flp,scr_eff) {
   # scr_eff # un vettore
   numerator=crossprod(flp,scr_eff) #t(scr_eff)%*%flp
   # A<- attributes(scr_eff)$scale_objects$A
@@ -14,7 +14,30 @@
 }
 
 #for effective and others:
-.score <- function(Y,flp) flp%*%Y
+.score <- function(flp,Y) flp%*%Y
+
+get_std_dev_score <- function(fit,x2){
+  # see also statmod::glm.scoretest()
+  w <- fit$weights
+  r <- fit$residuals
+  if (any(w <= 0)) {
+    r <- r[w > 0]
+    x2 <- x2[w > 0]
+    w <- w[w > 0]
+  }
+  fixed.dispersion <- (fit$family$family %in% c("poisson", 
+                                                "binomial"))
+  if (fixed.dispersion) 
+    dispersion <- 1
+  else if (fit$df.residual > 0) {
+    dispersion <- sum(w * fit$residuals^2)/fit$df.residual
+  }
+  
+  ws <- sqrt(w)
+  if(!is.null(fit$qr)) {x2.1w <- qr.resid(fit$qr, ws * x2)
+  } else  x2.1w = ws * x2
+  sqrt(colSums(as.matrix(x2.1w * x2.1w))*dispersion)
+}
 
 #transform sum stat into t stat
 .sum2t <- function(stat,sumY2,n){
@@ -23,6 +46,8 @@
   # print(sumY2)
   # print(stat)
   # stat0=stat
+  sumY2=sumY2*(n**0.5)
+  # if(any((sumY2-(stat^2)/n)*(n/(n-1))<0)) browser()
   stat=stat/sqrt((sumY2-(stat^2)/n)*(n/(n-1)))
   # print(stat)
 # if(any(is.na(stat))) browser()
@@ -33,45 +58,13 @@
 .t2p  <- function(pvls){
   mean(as.vector(pvls)>=pvls[1])
 }
-#################
-.flip_test<- function(Y,score_type="standardized",alternative="two.sided",
-                      n_flips=5000,
-                      seed=NULL,
-                      statTest="sum",...){
-  
-  if(alternative=="two.sided") ff <- function(Tspace) abs(Tspace) else
-    if(alternative=="less") ff <- function(Tspace) -Tspace else
-      if(alternative=="greater") ff <- function(Tspace) Tspace
-      
-      score_type=match.arg(score_type,c("orthogonalized","standardized","effective","basic"))
-      if(score_type=="standardized") .score_fun <- .score_std else
-        .score_fun <- .score
-      
-      nobs=nrow(Y)
-      Tobs=  .score_fun(Y,rep(1,nobs))
-      set.seed(seed)
-      Tspace=data.frame(as.vector(c(Tobs,replicate(n_flips-1,{
-        flp<-sample(c(-1,1),nobs, replace = T)
-        .score_fun(Y,flp)
-      }))))
-      set.seed(NULL)
-       if(score_type=="effective"||score_type=="orthogonalized") 
-        Tspace=.sum2t(Tspace,
-                      sumY2 = sum(Y^2,na.rm = TRUE),
-                      n=sum(!is.na(Y)))
-
-      p.values=.t2p(ff(unlist(Tspace)))
-      # named vector?
-      
-      out=list(Tspace=Tspace,p.values=p.values)
-      names(out$p.values)=names(Y)
-      return(out)
-}
 
 #################################
 mahalanobis_npc <- function(permT){
   if(ncol(permT)==0) return(rep(0,nrow(permT)))
+  permT=as.matrix(permT)
   dimnames(permT)=NULL
+  
   if(ncol(permT)==1) {
     permT=as.vector(permT)
     return(abs(permT)/(sum(permT^2)^.5))}
@@ -94,7 +87,7 @@ mahalanobis_npc_multi <- function(ids_list,permT){
 
 
 # i and exclude are indices of the columns of model.frame x
-socket_compute_scores <- function(i,model,score_type){
+socket_compute_scores <- function(i,model,score_type,nobservations=NULL){
   if(is.numeric(i)) {
     i=colnames(model$x)[i]
   }
@@ -122,43 +115,54 @@ socket_compute_scores <- function(i,model,score_type){
   # model$call$formula=update( model$call$formula,formula(paste("~.",paste("-",colnames(model[["x"]])[i],collapse=""))))
   frml=as.formula(paste(yname,"~0+."))
   model$call$formula=as.formula(paste(yname,"~0+."))
-  if(!is.null(model$offset)){
-    offs<-model$offset
-    model$call$formula=update( model$call$formula,formula(paste("~.+offset(offs)")))
-  }
+  # if(!is.null(model$offset)){
+  #   offs<-model$offset
+  #   model$call$formula=update( model$call$formula,formula(paste("~+offset(offs)")))
+  # }
   model$call$score_type=NULL
-  model$call$perms = NULL
-
+  model$call$n_flips = NULL
+  model$call$flips = NULL
+  
   if(length(grep("Negative Binomial",model$family$family))==1)
     model$call[[1]]=quote(glm.nb) else
       model$call[[1]]=quote(glm)
   model_i <-update(model)
   # print(flip_param_call$score_type)
   # browser()
-  scores=compute_scores(model0 = model_i,model1 = tested_X,score_type=score_type)
+  scores=compute_scores(model0 = model_i,model1 = tested_X,score_type=score_type,nobservations=nobservations)
 }
 
 
 #####################
 # i and exclude are indices of the columns of model.frame x
-socket_compute_flip <- function(scores,flip_param_call,score_type){
-  ############### fit the H1 model and append the scores (refitted under H0s)
-  
-  ###############################
-  ## compute flips
-  
-  ### TODO RENDERE PI AGILE INPUT DI id (es formula se possibile?) 
-  # + quality check
-  id=NULL
-  if(!is.null(flip_param_call$id)&&
-     (!(flip_param_call$score_type%in%c("orthogonalized"))))
-    scores=lapply(scores,rowsum,id)
-  # scores=as.matrix(unlist(scores[,]))
+socket_compute_flip <- function(scores,flip_param_call){
 
+#  flip_param_call$score_type=attributes(scores)$score_type
+  
+  
+  # scores=as.matrix(unlist(scores[,]))
+  if(is.null(flip_param_call$alternative)) flip_param_call$alternative = "two.sided"
+  if(flip_param_call$alternative=="two.sided") flip_param_call$ftail <- function(Tspace) abs(Tspace) else
+    if(flip_param_call$alternative=="less") flip_param_call$ftail <- function(Tspace) -Tspace else
+      if(flip_param_call$alternative=="greater") flip_param_call$ftail <- function(Tspace) Tspace
+      flip_param_call$alternative=NULL
+      
+      score_type=attributes(scores)$score_type
+      score_type=match.arg(score_type,c("orthogonalized","standardized","effective","basic"))
+      if(score_type=="standardized") flip_param_call$.score_fun <- .score_std else
+        flip_param_call$.score_fun <- .score
+
+      # if(flip_param_call$precompute_flips){
+      #   set.seed(seed)
+      #   flip_param_call$flips=.make_flips(nrow(scores),flip_param_call$n_flips)
+      # }
   results=lapply(1:ncol(scores), function(id_col){
     score1=scores[,id_col,drop=FALSE]
     attributes(score1)$scale_objects=attributes(scores)$scale_objects[[id_col]]
-    flip_param_call$Y=score1
+    attributes(score1)$score_type=attributes(scores)$score_type
+    attributes(score1)$sd=attributes(scores)$sd
+    attributes(score1)$resid_std=attributes(scores)$resid_std
+    flip_param_call$scores=score1
     res=eval(flip_param_call, parent.frame())  
     res$scores=score1
     res
@@ -180,7 +184,7 @@ socket_compute_flip <- function(scores,flip_param_call,score_type){
 # i and exclude are indices of the columns of model.frame x
 socket_compute_scores_and_flip <- function(i,model,exclude=NULL,
                                            flip_param_call){
-  scores  <- socket_compute_scores(i,model,score_type=flip_param_call$score_type)
+  scores  <- socket_compute_scores(i,model,score_type=flip_param_call$score_type,nobservations=flip_param_call$nobservations)
   results <- socket_compute_flip (scores,flip_param_call)
 }
 
@@ -247,3 +251,4 @@ get_par_expo_fam <- function(model0){
     Dhat<-Vhat<-1
     return(list(D=Dhat, V=Vhat))}
 }
+

@@ -50,8 +50,9 @@ anova.flipscores <- function(object, model1=NULL,
     Tspace=sapply(1:ncol(scores), function(id_col){
       score1=scores[,id_col,drop=FALSE]
       attributes(score1)$scale_objects=attributes(scores)$scale_objects[[id_col]]
-      as.matrix(.flip_test(score1,perms=n_flips,
-                                        score_type = score_type)$Tspace)
+      attributes(score1)$score_type=attributes(scores)$score_type
+      as.matrix(.flip_test_no_pval(score1, precompute_flips = FALSE,
+                           .score_fun = .score_std,n_flips = n_flips))
       })
     dst=mahalanobis_npc(Tspace)
     
@@ -96,6 +97,6 @@ anova.flipscores <- function(object, model1=NULL,
   
   
   attr(out_param,"heading")[[1]]=  paste(attr(out_param,"heading")[[1]],sep="",
-          "\nInference is provided by FlipScores approach (",object$n_flips," sign flips).\n")
+          "\nInference is provided by FlipScores approach (",object$flip_param_call$n_flips," sign flips).\n")
   return(out_param)
 }
